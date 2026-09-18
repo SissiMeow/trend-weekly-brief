@@ -1,0 +1,85 @@
+name: Fetch images
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "manifest.json"
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download images from manifest
+        shell: bash
+        run: |
+          set -uo pipefail
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.request
+
+          manifest = json.load(open("manifest.json"))
+          total = len(manifest)
+          downloaded = 0
+          failed = []
+
+          headers = {
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+              "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+              "Referer": "https://www.starstyle.com/",
+          }
+
+          for i, item in enumerate(manifest, 1):
+              dst = item["dst"]
+              src = item["src"]
+              if os.path.exists(dst) and os.path.getsize(dst) > 0:
+                  continue
+              os.makedirs(os.path.dirname(dst), exist_ok=True)
+              ok = False
+              for attempt in range(3):
+                  try:
+                      req = urllib.request.Request(src, headers=headers)
+                      with urllib.request.urlopen(req, timeout=60) as r:
+                          data = r.read()
+                      if len(data) == 0:
+                          raise RuntimeError("empty body")
+                      with open(dst, "wb") as f:
+                          f.write(data)
+                      ok = True
+                      downloaded += 1
+                      break
+                  except Exception as e:
+                      print(f"  [{i}/{total}] retry {attempt+1} {src} -> {e}", flush=True)
+                      time.sleep(3 * (attempt + 1))
+              if not ok:
+                  failed.append(src)
+              else:
+                  print(f"  [{i}/{total}] ok {dst} ({len(data)} bytes)", flush=True)
+
+          print(f"downloaded={downloaded} failed={len(failed)}", flush=True)
+          if failed:
+              print("FAILED URLs:", flush=True)
+              for u in failed:
+                  print("  " + u, flush=True)
+              sys.exit(1)
+          PY
+
+      - name: Commit images and drop manifest
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add trend-weekly/images/
+          rm -f manifest.json
+          git add manifest.json
+          if git diff --cached --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -m "chore: add week 2026-09-13 images"
+            git push
+          fi
