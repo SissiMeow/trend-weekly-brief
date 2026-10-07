@@ -80,6 +80,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "no changes to commit"
           else
-            git commit -m "chore: add week 2026-09-13 images"
+            git commit -m "chore: add images $(date -u +%Y-%m-%d)"
             git push
           fi
